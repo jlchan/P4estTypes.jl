@@ -107,7 +107,7 @@ function Base.getindex(p::Pxest{X}, i::Int) where {X}
             numquadrants = tree.quadrants.elem_count
             if i <= numquadrants
                 q = unsafe_load(Ptr{p4est_quadrant}(tree.quadrants.array), i)
-                return Quadrant{X,p4est_quadrant}(q)
+                return (t - 1, Quadrant{X,p4est_quadrant}(q))
             else
                 i -= numquadrants
             end

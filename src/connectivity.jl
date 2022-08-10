@@ -187,10 +187,12 @@ function unsafe_corner_to_tree(c::Connectivity{X}) where {X}
     return s
 end
 
-refine(c::Connectivity{4}, nedge) =
-    Connectivity{4}(p4est_connectivity_refine(c.pointer, nedge))
-refine(c::Connectivity{8}, nedge) =
-    Connectivity{8}(p8est_connectivity_refine(c.pointer, nedge))
+function refine(c::Connectivity{4}, nedge)
+    return Connectivity{4}(p4est_connectivity_refine(c.pointer, nedge))
+end
+function refine(c::Connectivity{8}, nedge)
+    return Connectivity{8}(p8est_connectivity_refine(c.pointer, nedge))
+end
 
 reduce!(c::Connectivity{4}) = p4est_connectivity_reduce(c.pointer)
 reduce!(c::Connectivity{8}) = p8est_connectivity_reduce(c.pointer)
@@ -198,11 +200,25 @@ reduce!(c::Connectivity{8}) = p8est_connectivity_reduce(c.pointer)
 complete!(c::Connectivity{4}) = p4est_connectivity_complete(c.pointer)
 complete!(c::Connectivity{8}) = p8est_connectivity_complete(c.pointer)
 
-function brick(n::Tuple{Int,Int}, p::Tuple{Bool,Bool} = (false, false))
-    Connectivity{4}(p4est_connectivity_new_brick(n..., p...))
+function brick(n::Tuple{Integer,Integer}, p::Tuple{Bool,Bool} = (false, false))
+    return Connectivity{4}(p4est_connectivity_new_brick(n..., p...))
 end
-function brick(n::Tuple{Int,Int,Int}, p::Tuple{Bool,Bool,Bool} = (false, false, false))
-    Connectivity{8}(p8est_connectivity_new_brick(n..., p...))
+function brick(
+    n::Tuple{Integer,Integer,Integer},
+    p::Tuple{Bool,Bool,Bool} = (false, false, false),
+)
+    return Connectivity{8}(p8est_connectivity_new_brick(n..., p...))
+end
+brick(l::Integer, m::Integer, p::Bool = false, q::Bool = false) = brick((l, m), (p, q))
+function brick(
+    l::Integer,
+    m::Integer,
+    n::Integer,
+    p::Bool = false,
+    q::Bool = false,
+    r::Bool = false,
+)
+    return brick((l, m, n), (p, q, r))
 end
 
 function Base.show(io::IO, c::Connectivity{X}) where {X}
@@ -212,20 +228,22 @@ end
 function Base.show(io::IO, mime::MIME{Symbol("text/plain")}, c::Connectivity{X}) where {X}
     show(io, c)
     if !get(io, :compact, false)
-        # Should we print everthing 1 based?
-        println(io, "\nnote: the following entries are zero-based")
-        println(io, "\ntrees:")
-        GC.@preserve c show(io, mime, unsafe_trees(c))
-        println(io, "\nvertices:")
-        GC.@preserve c show(io, mime, unsafe_vertices(c))
-        println(io, "\ntree to tree:")
-        GC.@preserve c show(io, mime, unsafe_tree_to_tree(c))
-        println(io, "\ntree to face:")
-        GC.@preserve c show(io, mime, unsafe_tree_to_face(c))
-        println(io, "\ntree to corner:")
-        GC.@preserve c show(io, mime, unsafe_tree_to_corner(c))
-        println(io, "\ncorners:")
-        GC.@preserve c show(io, mime, unsafe_corner_to_tree(c))
+        GC.@preserve c begin
+            # Should we print everthing 1 based?
+            println(io, "\nnote: the following entries are zero-based")
+            println(io, "\ntrees:")
+            show(io, mime, unsafe_trees(c))
+            println(io, "\nvertices:")
+            show(io, mime, unsafe_vertices(c))
+            println(io, "\ntree to tree:")
+            show(io, mime, unsafe_tree_to_tree(c))
+            println(io, "\ntree to face:")
+            show(io, mime, unsafe_tree_to_face(c))
+            println(io, "\ntree to corner:")
+            show(io, mime, unsafe_tree_to_corner(c))
+            println(io, "\ncorners:")
+            show(io, mime, unsafe_corner_to_tree(c))
+        end
     end
 end
 
