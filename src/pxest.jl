@@ -21,12 +21,11 @@ function Base.getindex(t::Tree{X,T}, i::Int) where {X,T}
     @boundscheck checkbounds(t, i)
     GC.@preserve t begin
         Q = X == 4 ? p4est_quadrant : p8est_quadrant
-        quadurant = unsafe_load(Ptr{Q}(t.pointer.quadrants.array), i)
-        return Quadrant{X,T,Q}(quadurant)
+        quadrant = unsafe_load(Ptr{Q}(t.pointer.quadrants.array), i)
+        return Quadrant{X,T,Q}(quadrant)
     end
 end
 Base.IndexStyle(::Tree) = IndexLinear()
-
 
 offset(tree::Tree) = tree.pointer.quadrants_offset
 
@@ -188,5 +187,5 @@ function iterateforest(
         )
     end
 
-    return nothing
+    return
 end
