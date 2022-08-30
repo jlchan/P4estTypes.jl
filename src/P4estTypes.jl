@@ -13,6 +13,16 @@ export lengthoflocalquadrants, lengthofglobalquadrants # Find better names
 export level, storeuserdata!, loaduserdata
 export offset
 export iterateforest
+export ghostlayer, lnodes
+export coarsen!, refine!, balance!, partition!
+
+CONNECT_FULL(::Val{4}) = P4EST_CONNECT_FULL
+CONNECT_FULL(::Val{8}) = P8EST_CONNECT_FULL
+CONNECT_FACE(::Val{4}) = P4EST_CONNECT_FACE
+CONNECT_FACE(::Val{8}) = P8EST_CONNECT_FACE
+CONNECT_CORNER(::Val{4}) = P4EST_CONNECT_CORNER
+CONNECT_CORNER(::Val{8}) = P8EST_CONNECT_CORNER
+CONNECT_EDGE(::Val{8}) = P8EST_CONNECT_CORNER
 
 include("sc.jl")
 
