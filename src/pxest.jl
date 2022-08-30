@@ -60,6 +60,21 @@ mutable struct Pxest{X,T,P,C} <: AbstractArray{Tree,1}
     end
 end
 
+function _preinit_callback_generate(::Type{T}, init) where {T}
+    Ccallback, ctx = Cfunction{
+        Cvoid,
+        Tuple{Ptr{p4est},p4est_topidx_t,Ptr{p4est_quadrant}},
+    }() do _, which_tree, quadrant
+        quadrant = Quadrant{4,T,Ptr{p4est_quadrant}}(quadrant)
+        # Figure out a way to pass a forest into this functions
+        init(nothing, which_tree + 1, quadrant)
+        return
+    end
+
+    return Ccallback, ctx
+end
+
+
 function pxest(
     connectivity::Connectivity{4};
     comm = MPI.COMM_WORLD,
@@ -72,18 +87,21 @@ function pxest(
 )
     MPI.Initialized() || MPI.Init()
 
-    init_callback = isnothing(init) ? C_NULL : _init_callback_generate(forest, init)
+    init_callback, init_ctx =
+        isnothing(init) ? (C_NULL, nothing) : _preinit_callback_generate(data_type, init)
 
-    pointer = p4est_new_ext(
-        comm,
-        connectivity,
-        min_quadrants,
-        min_level,
-        fill_uniform,
-        sizeof(data_type),
-        init_callback,
-        user_pointer,
-    )
+    GC.@preserve init_ctx begin
+        pointer = p4est_new_ext(
+            comm,
+            connectivity,
+            min_quadrants,
+            min_level,
+            fill_uniform,
+            sizeof(data_type),
+            init_callback,
+            user_pointer,
+        )
+    end
     return Pxest{4}(pointer, connectivity, comm, data_type)
 end
 
@@ -99,18 +117,21 @@ function pxest(
 )
     MPI.Initialized() || MPI.Init()
 
-    init_callback = isnothing(init) ? C_NULL : _init_callback_generate(forest, init)
+    init_callback, init_ctx =
+        isnothing(init) ? (C_NULL, nothing) : _preinit_callback_generate(data_type, init)
 
-    pointer = p8est_new_ext(
-        comm,
-        connectivity,
-        min_quadrants,
-        min_level,
-        fill_uniform,
-        sizeof(data_type),
-        init_callback,
-        user_pointer,
-    )
+    GC.@preserve init_ctx begin
+        pointer = p8est_new_ext(
+            comm,
+            connectivity,
+            min_quadrants,
+            min_level,
+            fill_uniform,
+            sizeof(data_type),
+            init_callback,
+            user_pointer,
+        )
+    end
     return Pxest{8}(pointer, connectivity, comm, data_type)
 end
 
@@ -220,60 +241,61 @@ function Base.getindex(p::Pxest{X,T}, i::Int) where {X,T}
 end
 Base.IndexStyle(::Pxest) = IndexLinear()
 
-function _p4est_volume_callback_generate(forest, ghost, user_data, volume_callback)
-    Ccallback, _ =
+function _p4est_volume_callback_generate(
+    forest::Pxest{4,T},
+    ghost,
+    callback,
+    user_data,
+) where {T}
+    Ccallback, ctx =
         Cfunction{Cvoid,Tuple{Ptr{p4est_iter_volume_info_t},Ptr{Cvoid}}}() do info, _
-            T = typeofquadrantuserdata(forest)
             quadrant = Quadrant{4,T,Ptr{p4est_quadrant}}(info.quad)
-            volume_callback(
-                forest,
-                ghost,
-                quadrant,
-                info.quadid + 1,
-                info.treeid + 1,
-                user_data,
-            )
+            callback(forest, ghost, quadrant, info.quadid + 1, info.treeid + 1, user_data)
             return
         end
 
-    return Ccallback
+    return Ccallback, ctx
 end
 
 function iterateforest(
     forest::Pxest{4};
     user_data = nothing,
     ghost_layer = nothing,
-    volume_callback = nothing,
-    face_callback = nothing,
-    corner_callback = nothing,
+    volume = nothing,
+    face = nothing,
+    corner = nothing,
 )
 
-    _volume_callback =
-        isnothing(volume_callback) ? C_NULL :
-        _p4est_volume_callback_generate(forest, ghost_layer, user_data, volume_callback)
-    @assert face_callback === nothing
-    @assert corner_callback === nothing
+    volume_callback, volume_ctx =
+        isnothing(volume) ? (C_NULL, nothing) :
+        _p4est_volume_callback_generate(forest, ghost_layer, volume, user_data)
 
-    p4est_iterate(forest, C_NULL, C_NULL, _volume_callback, C_NULL, C_NULL)
+    @assert face === nothing
+    @assert corner === nothing
+
+    GC.@preserve volume_ctx begin
+        p4est_iterate(forest, C_NULL, C_NULL, volume_callback, C_NULL, C_NULL)
+    end
 
     return
 end
 
 function _coarsen_callback_generate(forest::Pxest{4,T}, coarsen) where {T}
-    Ccallback, _ = Cfunction{
+    Ccallback, ctx = Cfunction{
         Cint,
         Tuple{Ptr{p4est},p4est_topidx_t,Ptr{Ptr{p4est_quadrant}}},
     }() do _, which_tree, children_ptr
         children_ptr = unsafe_wrap(Array, children_ptr, 4)
-        children = Quadrant{4,T,Ptr{p4est_quadrant}}.(children_ptr)
+        children =
+            ntuple(i -> Quadrant{4,T,Ptr{p4est_quadrant}}(children_ptr[i]), Val(4))
         return coarsen(forest, which_tree + 1, children) ? one(Cint) : zero(Cint)
     end
 
-    return Ccallback
+    return Ccallback, ctx
 end
 
 function _refine_callback_generate(forest::Pxest{4,T}, refine) where {T}
-    Ccallback, _ = Cfunction{
+    Ccallback, ctx = Cfunction{
         Cint,
         Tuple{Ptr{p4est},p4est_topidx_t,Ptr{p4est_quadrant}},
     }() do _, which_tree, quadrant
@@ -281,11 +303,11 @@ function _refine_callback_generate(forest::Pxest{4,T}, refine) where {T}
         return refine(forest, which_tree + 1, quadrant) ? one(Cint) : zero(Cint)
     end
 
-    return Ccallback
+    return Ccallback, ctx
 end
 
 function _init_callback_generate(forest::Pxest{4,T}, init) where {T}
-    Ccallback, _ = Cfunction{
+    Ccallback, ctx = Cfunction{
         Cvoid,
         Tuple{Ptr{p4est},p4est_topidx_t,Ptr{p4est_quadrant}},
     }() do _, which_tree, quadrant
@@ -294,7 +316,7 @@ function _init_callback_generate(forest::Pxest{4,T}, init) where {T}
         return
     end
 
-    return Ccallback
+    return Ccallback, ctx
 end
 
 function _replace_callback_generate(forest::Pxest{4,T}, replace) where {T}
@@ -366,20 +388,26 @@ function coarsen!(
 ) where {X}
 
     GC.@preserve forest begin
-        coarsen_callback =
-            isnothing(coarsen) ? C_NULL : _coarsen_callback_generate(forest, coarsen)
-        init_callback = isnothing(init) ? C_NULL : _init_callback_generate(forest, init)
+        coarsen_callback, coarsen_ctx =
+            isnothing(coarsen) ? (C_NULL, nothing) :
+            _coarsen_callback_generate(forest, coarsen)
+        init_callback, init_ctx =
+            isnothing(init) ? (C_NULL, nothing) : _init_callback_generate(forest, init)
         replace_callback =
             isnothing(replace) ? C_NULL : _replace_callback_generate(forest, replace)
 
-        _coarsen_ext(
-            forest,
-            recursive,
-            callback_orphans,
-            coarsen_callback,
-            init_callback,
-            replace_callback,
-        )
+        @show typeof(coarsen_callback)
+        @show typeof(coarsen_ctx)
+        GC.@preserve coarsen_ctx begin
+            _coarsen_ext(
+                forest,
+                recursive,
+                callback_orphans,
+                coarsen_callback,
+                init_callback,
+                replace_callback,
+            )
+        end
     end
 
     return
@@ -402,19 +430,23 @@ function refine!(
     replace = nothing,
 ) where {X}
 
-    refine_callback = isnothing(refine) ? C_NULL : _refine_callback_generate(forest, refine)
-    init_callback = isnothing(init) ? C_NULL : _init_callback_generate(forest, init)
+    refine_callback, refine_ctx =
+        isnothing(refine) ? (C_NULL, nothing) : _refine_callback_generate(forest, refine)
+    init_callback, init_ctx =
+        isnothing(init) ? (C_NULL, nothing) : _init_callback_generate(forest, init)
     replace_callback =
         isnothing(replace) ? C_NULL : _replace_callback_generate(forest, replace)
 
-    _refine_ext(
-        forest,
-        recursive,
-        maxlevel,
-        refine_callback,
-        init_callback,
-        replace_callback,
-    )
+    GC.@preserve refine_ctx begin
+        _refine_ext(
+            forest,
+            recursive,
+            maxlevel,
+            refine_callback,
+            init_callback,
+            replace_callback,
+        )
+    end
 
     return
 end
@@ -434,7 +466,8 @@ function balance!(
     replace = nothing,
 ) where {X}
 
-    init_callback = isnothing(init) ? C_NULL : _init_callback_generate(forest, init)
+    init_callback, init_ctx =
+        isnothing(init) ? (C_NULL, nothing) : _init_callback_generate(forest, init)
     replace_callback =
         isnothing(replace) ? C_NULL : _replace_callback_generate(forest, replace)
 
